@@ -12,8 +12,8 @@ update this file.
 | # | Session | Status | Tag |
 |---|---------|--------|-----|
 | S1 | Bootstrap: venv, Makefile, CI, vendored firmware, smoke test | ✅ done | |
-| S2 | `pmsm_plant.c` — dq plant ported to C | ⬜ next | |
-| S3 | `fastcore.c` — `advance_n()`, reproduce repo #4 figures, benchmark | ⬜ | `v0.1-fastcore` |
+| S2 | `pmsm_plant.c` — dq plant ported to C | ✅ done | |
+| S3 | `fastcore.c` — `advance_n()`, reproduce repo #4 figures, benchmark | ⬜ next | `v0.1-fastcore` |
 | S4 | `sim/vehicle.py` — longitudinal dynamics | ⬜ | |
 | S5 | `sim/pack.py` — 96-cell vectorized 2-RC ECM | ⬜ | |
 | S6 | `sim/thermal.py` + `sim/aging.py` | ⬜ | |
@@ -52,3 +52,40 @@ silently.
 live in `edrive-foc-control/sim/params.py` (35 kW / 200 Nm 8-pole IPMSM,
 Somefun & Longe 2026). Validate the C plant against analytic steady-state
 operating points through ctypes before wiring it to the controller in S3.
+
+---
+
+## S2 — dq PMSM plant in C (done)
+
+**Shipped:** `firmware/pmsm_plant.c/.h` — electrical dq dynamics, torque with
+the reluctance term, mechanical ODE, RK4 fixed-step integration, the ideal
+inverter (duties → average dq voltage) and the phase-current sensor view.
+`sim/params.py` with the cited motor and derived gains. Plant bindings in
+`sim/clib.py`. 11 new tests, 16 total, all green.
+
+**Decided:** the plant is `double` while the vendored controller stays `float`.
+The controller is single precision because a real motor MCU is; the plant is
+the reference physics that controller is judged against, so it must not
+contribute the error it is meant to measure. It nonetheless lives in
+`firmware/` because compiling into the same shared library is what buys the
+real-time headroom in S3 — the header comment marks the boundary.
+
+`theta_m` is wrapped to [0, 2π). Integer pole pairs mean this changes no
+observable, but it keeps absolute angle precision bounded over a long drive.
+
+**Found:** the rotating steady-state test initially failed at 0.18% error. Not
+a tolerance problem — 0.2 s is only ~6.8 electrical time constants and the
+residual exponential was still larger than the tolerance. Now integrates 1.0 s
+(~34 τ). Worth remembering: this machine's electrical time constant is ~29.5 ms,
+which is slow enough to matter in later settling tests.
+
+**Deferred:** nothing.
+
+**S3 starts from:** `firmware/fastcore.c`. Write `advance_n(n_steps, ...)` that
+runs `foc_step` (and `spd_step` on its divider) against `pmsm_plant` entirely
+inside C, so Python crosses the ctypes boundary once per millisecond rather
+than once per 100 µs. Then reproduce `edrive-foc-control`'s torque-step and
+speed-step figures through the new core, and benchmark simulated-seconds per
+wall-second. Gate for the phase tag: figures match **and** ≥5× real-time
+headroom. The vendored `Spd`/`Fd` structs are not yet mirrored in `sim/clib.py`
+— S3 adds them.

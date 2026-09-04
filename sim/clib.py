@@ -77,6 +77,58 @@ def motor_params(m=None):
 
 
 
+# ---- struct mirrors of firmware/speed_ctrl.h and fault_detect.h ----
+# Only the *parameter* structs are mirrored. The controller state lives inside
+# the opaque fc_t and Python never touches it.
+
+class SpdParams(ctypes.Structure):
+    _fields_ = [(n, ctypes.c_float) for n in
+                ("kp", "ki", "ts", "t_filt", "iq_max")]
+
+
+class FdParams(ctypes.Structure):
+    _fields_ = [("ts", ctypes.c_float), ("sum_thresh", ctypes.c_float),
+                ("mag_thresh", ctypes.c_float), ("ang_thresh", ctypes.c_float),
+                ("debounce", ctypes.c_int)]
+
+
+FD_CURRENT_SUM, FD_CURRENT_MAG, FD_ENCODER = 1, 2, 4
+
+
+# ---- struct mirrors of firmware/fastcore.h ----
+
+FC_MODE_CURRENT, FC_MODE_SPEED = 0, 1
+FC_OK, FC_ERR_NONFINITE = 0, 1
+
+
+class FcConfig(ctypes.Structure):
+    _fields_ = [("v_dc", ctypes.c_double), ("dt", ctypes.c_double),
+                ("n_sub", ctypes.c_int), ("speed_div", ctypes.c_int)]
+
+
+class FcCmd(ctypes.Structure):
+    _fields_ = [("mode", ctypes.c_int),
+                ("id_ref", ctypes.c_double), ("iq_ref", ctypes.c_double),
+                ("w_ref", ctypes.c_double), ("t_load", ctypes.c_double),
+                ("clamp_speed", ctypes.c_int), ("w_clamp", ctypes.c_double)]
+
+
+class FcOut(ctypes.Structure):
+    _fields_ = [
+        ("i_d", ctypes.c_double), ("i_q", ctypes.c_double),
+        ("w_m", ctypes.c_double), ("theta_e", ctypes.c_double),
+        ("torque", ctypes.c_double),
+        ("vd", ctypes.c_double), ("vq", ctypes.c_double),
+        ("iq_ref", ctypes.c_double),
+        ("duty_a", ctypes.c_double), ("duty_b", ctypes.c_double),
+        ("duty_c", ctypes.c_double),
+        ("p_elec_mean", ctypes.c_double), ("torque_mean", ctypes.c_double),
+        ("w_m_mean", ctypes.c_double),
+        ("fault_flags", ctypes.c_uint), ("sat_count", ctypes.c_int),
+        ("status", ctypes.c_int),
+    ]
+
+
 def load():
     """Load the shared library with argtypes bound. Raises if `make` hasn't run."""
     if not _LIBPATH.exists():
@@ -119,6 +171,22 @@ def load():
     lib.pmsm_duties_to_vdq.restype = None
     lib.pmsm_dq_to_phase.argtypes = [_D, _D, _D, _PD, _PD, _PD]
     lib.pmsm_dq_to_phase.restype = None
+
+    lib.fc_sizeof.argtypes = []
+    lib.fc_sizeof.restype = ctypes.c_size_t
+    lib.fc_init.argtypes = [ctypes.c_void_p, ctypes.POINTER(FcConfig),
+                            ctypes.POINTER(PmsmParams),
+                            ctypes.POINTER(FocParams),
+                            ctypes.POINTER(SpdParams),
+                            ctypes.POINTER(FdParams)]
+    lib.fc_init.restype = None
+    lib.fc_set_speed.argtypes = [ctypes.c_void_p, _D]
+    lib.fc_set_speed.restype = None
+    lib.fc_advance.argtypes = [ctypes.c_void_p, ctypes.POINTER(FcCmd),
+                               ctypes.c_int, ctypes.POINTER(FcOut)]
+    lib.fc_advance.restype = ctypes.c_int
+    lib.fc_clear_faults.argtypes = [ctypes.c_void_p]
+    lib.fc_clear_faults.restype = None
     return lib
 
 

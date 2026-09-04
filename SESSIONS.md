@@ -13,8 +13,8 @@ update this file.
 |---|---------|--------|-----|
 | S1 | Bootstrap: venv, Makefile, CI, vendored firmware, smoke test | ✅ done | |
 | S2 | `pmsm_plant.c` — dq plant ported to C | ✅ done | |
-| S3 | `fastcore.c` — `advance_n()`, reproduce repo #4 figures, benchmark | ⬜ next | `v0.1-fastcore` |
-| S4 | `sim/vehicle.py` — longitudinal dynamics | ⬜ | |
+| S3 | `fastcore.c` — `advance_n()`, reproduce repo #4 figures, benchmark | ✅ done | `v0.1-fastcore` |
+| S4 | `sim/vehicle.py` — longitudinal dynamics | ⬜ next | |
 | S5 | `sim/pack.py` — 96-cell vectorized 2-RC ECM | ⬜ | |
 | S6 | `sim/thermal.py` + `sim/aging.py` | ⬜ | |
 | S7 | `sim/engine.py` — three-domain scheduler, WLTP run | ⬜ | `v0.2-plant` |
@@ -89,3 +89,52 @@ speed-step figures through the new core, and benchmark simulated-seconds per
 wall-second. Gate for the phase tag: figures match **and** ≥5× real-time
 headroom. The vendored `Spd`/`Fd` structs are not yet mirrored in `sim/clib.py`
 — S3 adds them.
+
+---
+
+## S3 — the fast domain closed inside C (done) — Phase 1 complete, `v0.1-fastcore`
+
+**Shipped:** `firmware/fastcore.c/.h` running whole PWM periods without
+returning to Python; `sim/fastcore.py` as its window-based Python face;
+`scenarios/iq_step.py`, `speed_step.py`, `benchmark.py`; both figures
+committed. 10 new tests, 26 total, green.
+
+**Gate met, both halves:**
+
+| | this repo | edrive-foc-control |
+|---|---|---|
+| i_q step rise | 0.600 ms | 0.600 ms |
+| i_q step overshoot | 0.0% | 0.2% |
+| speed step rise | 66.0 ms | 65.8 ms |
+| speed step overshoot | 0.6% | 0.6% |
+| 50 N m load dip | 8.3 rpm | 8.3 rpm |
+| real-time factor | **200x** (gate: 5x) | — |
+
+5 µs per 1 ms window, leaving 995 µs of every millisecond for the slow domain.
+That is a very comfortable budget for S4–S13 — the vehicle, 96-cell pack,
+thermal, aging, EKF, CAN and render all have to fit inside it, and now
+plainly will.
+
+**Decided:** the speed divider counts *absolute* ticks, not ticks within a
+window, so a caller's choice of window size cannot shift control timing. The
+test that one 50-tick window equals fifty 1-tick windows to twelve digits
+guards this. If it ever fails, the real-time engine and the offline scenarios
+have diverged and every figure in the repo is untrustworthy.
+
+`fc_t` is opaque to Python (allocate `fc_sizeof()` bytes) so adding controller
+state in C cannot silently corrupt the binding.
+
+**Known convention difference:** this repo samples after the tick just run;
+repo #4 sampled before. That shifts sample-counted metrics (settling time,
+steady-state error at the final sample) by one PWM period. It is not a physics
+difference and the tests allow exactly one tick for it.
+
+**Deferred:** sensor-fault injection hooks in the fast domain. S8 owns the
+`Sensors` boundary and will add current-sensor and encoder corruption inside
+`fc_advance` then, where it belongs, rather than being guessed at now.
+
+**S4 starts from:** `sim/vehicle.py` — longitudinal dynamics (mass, rolling
+resistance, aero drag, road grade, gear ratio, regen blend) reflected to the
+motor shaft as the `t_load` that `fc_advance` already accepts. Parameters are
+an ASSUMED generic 1500 kg compact EV and must say so where they are defined,
+per the rule in `sim/params.py`. Validate against an analytic coastdown.

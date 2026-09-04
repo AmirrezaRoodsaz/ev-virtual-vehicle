@@ -49,6 +49,32 @@ class FocOut(ctypes.Structure):
 
 _F = ctypes.c_float
 _PF = ctypes.POINTER(ctypes.c_float)
+_D = ctypes.c_double
+_PD = ctypes.POINTER(ctypes.c_double)
+
+# ---- struct mirrors of firmware/pmsm_plant.h (owned here, not vendored) ----
+# Note the type change: the plant is double, the controller float. See the
+# header comment in pmsm_plant.h for why.
+
+class PmsmParams(ctypes.Structure):
+    _fields_ = [("rs", ctypes.c_double), ("ld", ctypes.c_double),
+                ("lq", ctypes.c_double), ("psi_f", ctypes.c_double),
+                ("j", ctypes.c_double), ("b", ctypes.c_double),
+                ("p", ctypes.c_int)]
+
+
+class PmsmState(ctypes.Structure):
+    _fields_ = [("i_d", ctypes.c_double), ("i_q", ctypes.c_double),
+                ("w_m", ctypes.c_double), ("theta_m", ctypes.c_double)]
+
+
+def motor_params(m=None):
+    """Build the C plant parameter struct from sim.params.MotorParams."""
+    from sim.params import MOTOR
+    m = MOTOR if m is None else m
+    return PmsmParams(rs=m.Rs, ld=m.Ld, lq=m.Lq, psi_f=m.psi_f,
+                      j=m.J, b=m.B, p=m.p)
+
 
 
 def load():
@@ -74,6 +100,25 @@ def load():
     lib.foc_step.argtypes = [ctypes.POINTER(Foc), ctypes.POINTER(FocIn),
                              ctypes.POINTER(FocOut)]
     lib.foc_step.restype = None
+
+    lib.pmsm_init.argtypes = [ctypes.POINTER(PmsmState)]
+    lib.pmsm_init.restype = None
+    lib.pmsm_torque.argtypes = [ctypes.POINTER(PmsmParams), _D, _D]
+    lib.pmsm_torque.restype = _D
+    lib.pmsm_theta_e.argtypes = [ctypes.POINTER(PmsmParams),
+                                 ctypes.POINTER(PmsmState)]
+    lib.pmsm_theta_e.restype = _D
+    lib.pmsm_w_e.argtypes = [ctypes.POINTER(PmsmParams),
+                             ctypes.POINTER(PmsmState)]
+    lib.pmsm_w_e.restype = _D
+    lib.pmsm_step.argtypes = [ctypes.POINTER(PmsmParams),
+                              ctypes.POINTER(PmsmState), _D, _D, _D, _D]
+    lib.pmsm_step.restype = None
+    lib.pmsm_duties_to_vdq.argtypes = [ctypes.POINTER(ctypes.c_double * 3),
+                                       _D, _D, _PD, _PD]
+    lib.pmsm_duties_to_vdq.restype = None
+    lib.pmsm_dq_to_phase.argtypes = [_D, _D, _D, _PD, _PD, _PD]
+    lib.pmsm_dq_to_phase.restype = None
     return lib
 
 
@@ -81,3 +126,9 @@ def out2():
     """Two fresh c_float outputs plus their pointers, for the transform calls."""
     a, b = ctypes.c_float(), ctypes.c_float()
     return a, b, ctypes.byref(a), ctypes.byref(b)
+
+
+def dout(n):
+    """n fresh c_double outputs plus their pointers, for the plant calls."""
+    vals = [ctypes.c_double() for _ in range(n)]
+    return vals, [ctypes.byref(v) for v in vals]
